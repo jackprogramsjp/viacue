@@ -1,6 +1,4 @@
-import uuid
-
-from annotated_types import MinLen, MaxLen
+from annotated_types import MinLen
 from typing import Annotated
 from pydantic import BaseModel, EmailStr
 
@@ -14,6 +12,5 @@ class UserSignup(BaseModel):
     language: Annotated[str, MinLen(1)]
     accommodation: Annotated[str, MinLen(1)]
 
-class UserVerification(BaseModel):
-    email: EmailStr
-    confirmation: Annotated[str, MaxLen(6)]
+class RefreshToken(BaseModel):
+    refresh_token: str

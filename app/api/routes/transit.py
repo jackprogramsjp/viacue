@@ -1,5 +1,6 @@
+"""
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from app.core.config import settings
 import xmltodict
 
@@ -7,14 +8,10 @@ router = APIRouter()
 
 BASE_API_URL = "http://api.511.org/transit"
 
-# StopPlace API: Provides stops with accessibility information
-@router.get("/transit/accessible_stops")
-async def get_accessible_stops(operator_id: str = Query(..., description="Transit operator ID (e.g., 'SF')")):
-    api_url = f"{BASE_API_URL}/stopPlaces?api_key={settings.TRANSIT_API_KEY}&operator_id={operator_id}"
-    
+#function to handle http request
+async def get_data(client: httpx.AsyncClient, url: str):
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(api_url)
+        response = await client.get(url)
         response.raise_for_status()  # Raise HTTPError for bad responses (4xx and 5xx)
     except httpx.HTTPStatusError as e:
         raise HTTPException(status_code=e.response.status_code, detail=f"HTTP error: {e}")
@@ -23,99 +20,122 @@ async def get_accessible_stops(operator_id: str = Query(..., description="Transi
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")
 
-    # Check if data is accessible then get the "Siri" key from the JSON response
-    if response.status_code == 200:
+    return response
+
+
+
+
+# Dependency to provide a reusable AsyncClient instance
+async def get_http_client() -> httpx.AsyncClient:
+    async with httpx.AsyncClient() as client:
+        yield client
+
+# StopPlace API: Provides stops with accessibility information
+@router.get("/transit/accessible_stops")
+async def get_accessible_stops(
+    operator_id: str = Query(..., description="Transit operator ID (e.g., 'SF')"),
+    client: httpx.AsyncClient = Depends(get_http_client),
+):
+    #get the data
+    api_url = f"{BASE_API_URL}/stopPlaces?api_key={settings.TRANSIT_API_KEY}&operator_id={operator_id}"
+    response = await get_data(client, api_url)
+
+    # Parse the response
+    try:
         data = response.json()
+        stop_places = data["Siri"]["ServiceDelivery"]["DataObjectDelivery"]["dataObjects"]["SiteFrame"]["stopPlaces"]["StopPlace"]
+    except KeyError:
+        raise HTTPException(status_code=404, detail="No stop places found.")
+    
+    # Sort stops: MobilityImpairedAccess 'Yes' at the top, others at the bottom
+    sorted_stops = sorted(
+        stop_places,
+        key=lambda stop: stop.get("AccessibilityAssessment", {}).get("MobilityImpairedAccess") != "Yes",
+    )
 
-        # Extract stop places from the "Siri" key -> "ServiceDelivery" -> "DataObjectDelivery" -> "dataObjects"
-        try:
-            stop_places = data["Siri"]["ServiceDelivery"]["DataObjectDelivery"]["dataObjects"]["SiteFrame"]["stopPlaces"]["StopPlace"]
-        except KeyError:
-            raise HTTPException(status_code=404, detail="No stop places found.")
-        
-        # Sort stops: MobilityImpairedAccess 'Yes' at the top, others at the bottom
-        sorted_stops = sorted(stop_places, key=lambda stop: stop.get('AccessibilityAssessment', {}).get('MobilityImpairedAccess') != 'Yes')
-
-        # Return the sorted stops
-        return {"accessible_stops": sorted_stops}
-
-
+    return {"accessible_stops": sorted_stops}
 
 # Predictions API: Provides current arrival/departure times
 @router.get("/transit/predictions")
 async def get_real_time_predictions(
     operator_id: str = Query(..., description="Transit operator ID (e.g., 'SF')"),
-    stop_id: str = Query(..., description="Transit stop ID")
+    stop_id: str = Query(..., description="Transit stop ID"),
+    client: httpx.AsyncClient = Depends(get_http_client),
 ):
-    """
-    Fetch real-time arrival predictions for a specific stop.
-    """
     api_url = f"{BASE_API_URL}/StopMonitoring?api_key={settings.TRANSIT_API_KEY}&agency={operator_id}&stop_id={stop_id}"
-    
+    response = await get_data(client, api_url)
+
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(api_url)
-        response.raise_for_status()  # Raise HTTPError for bad responses (4xx and 5xx)
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=e.response.status_code, detail=f"HTTP error: {e}")
-    except httpx.RequestError as e:
-        raise HTTPException(status_code=500, detail=f"Request error: {e}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")
-
-    if response.status_code == 200:
-        # Access the "Siri" key from the JSON response
         data = response.json()
+        predictions = data["Siri"]["ServiceDelivery"]["DataObjectDelivery"]["dataObjects"]["SiteFrame"]["stopPlaces"]["StopPlace"]
+    except KeyError:
+        raise HTTPException(status_code=404, detail="No predictions found.")
 
-        # Extract real-time predictions from the "Siri" key -> "ServiceDelivery" -> "DataObjectDelivery" -> "dataObjects"
-        try:
-            predictions = data["Siri"]["ServiceDelivery"]["DataObjectDelivery"]["dataObjects"]["SiteFrame"]["stopPlaces"]["StopPlace"]
-        except KeyError:
-            raise HTTPException(status_code=404, detail="No predictions found.")
-        
-        return {"real_time_predictions": predictions}
-    else:
-        raise HTTPException(status_code=response.status_code, detail="Failed to fetch real-time predictions")
+    return {"real_time_predictions": predictions}
 
 
 # Patterns API: Helps users know the stop sequence and when to get off
 @router.get("/transit/patterns")
 async def get_route_patterns(
     operator_id: str = Query(..., description="Transit operator ID (e.g., 'SF')"),
-    pattern_id: str = Query(..., description="Pattern ID for the transit route")
+    pattern_id: str = Query(..., description="Pattern ID for the transit route"),
+    client: httpx.AsyncClient = Depends(get_http_client),
 ):
-    """
-    Fetch route patterns for a transit operator and pattern ID.
-    """
     api_url = f"{BASE_API_URL}/patterns?api_key={settings.TRANSIT_API_KEY}&operator_id={operator_id}&pattern_id={pattern_id}"
-    async with httpx.AsyncClient() as client:
-        response = await client.get(api_url)
+    response = await get_data(client, api_url)
 
-    if response.status_code == 200:
-        # Parse XML to dictionary
+    # Parse XML to dictionary
+    try:
         data = xmltodict.parse(response.text)
-        return {"route_patterns": data}
-    else:
-        raise HTTPException(status_code=response.status_code, detail="Failed to fetch route patterns")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to parse XML response.")
+
+    return {"route_patterns": data}
 
 
-#Transit Scheduled Departures for a Stop API:
-# Scheduled departures ensure reliability when real-time data is unavailable
+# Scheduled Departures API: Provides scheduled departures for a specific stop
 @router.get("/transit/schedule")
 async def get_scheduled_departures(
     operator_id: str = Query(..., description="Transit operator ID (e.g., 'SF')"),
-    stop_id: str = Query(..., description="Transit stop ID")
+    stop_id: str = Query(..., description="Transit stop ID"),
+    client: httpx.AsyncClient = Depends(get_http_client),
 ):
-    """
-    Fetch scheduled departures for a specific stop.
-    """
     api_url = f"{BASE_API_URL}/stoptimetable?api_key={settings.TRANSIT_API_KEY}&MonitoringRef={stop_id}&OperatorRef={operator_id}"
-    async with httpx.AsyncClient() as client:
-        response = await client.get(api_url)
+    response = await get_data(client, api_url)
 
-    if response.status_code == 200:
-        # Parse XML to dictionary
+"""  
+
+
+#NEW CODEEE
+
+import httpx
+from fastapi import APIRouter, HTTPException, Query
+from app.core.config import settings
+from typing import List, Optional
+
+router = APIRouter()
+
+BASE_API_URL = "http://api.511.org/transit"
+
+# Helper function to fetch stop places
+async def fetch_stop_places(operator_id: str) -> dict:
+    api_url = f"{BASE_API_URL}/stopPlaces?api_key={settings.TRANSIT_API_KEY}&operator_id={operator_id}"
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(api_url)
+        response.raise_for_status()  # Raise HTTPError for bad responses (4xx and 5xx)
+        return response.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=f"HTTP error: {e}")
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=500, detail=f"Request error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")
+ # Parse XML to dictionary
+    try:
         data = xmltodict.parse(response.text)
-        return {"scheduled_departures": data}
-    else:
-        raise HTTPException(status_code=response.status_code, detail="Failed to fetch scheduled departures")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to parse XML response.")
+
+    return {"scheduled_departures": data}

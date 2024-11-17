@@ -34,5 +34,14 @@ class CognitoClient:
             ClientId=settings.AWS_COGNITO_CLIENT_ID,
         )
 
+    def get_access_token(self, refresh_token: str):
+        return self.client.initiate_auth(
+            ClientId=settings.AWS_COGNITO_CLIENT_ID,
+            AuthFlow="REFRESH_TOKEN_AUTH",
+            AuthParameters={
+                "REFRESH_TOKEN": refresh_token,
+            }
+        )
+
 def get_cognito_client() -> CognitoClient:
     return CognitoClient()

@@ -1,7 +1,7 @@
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
-from app.api.deps import get_cognito_client, CognitoClient
-from app.models import UserSignup, UserLogin, UserVerification
+from app.api.deps import CognitoClient
+from app.models import UserSignup, UserLogin
 from dataclasses import dataclass
 import botocore
 
@@ -57,4 +57,20 @@ class Auth:
 
         return JSONResponse(content=content, status_code=200)
 
-    
+    def get_access_token(self, refresh_token: str):
+        try:
+            response = self.cognito.get_access_token(refresh_token)
+        except botocore.exceptions.ClientError as e:
+            raise_http_exception(e, [
+                ResponseError("NotAuthorizedException", 401, "Refresh token is invalid"),
+                ResponseError("LimitExceededException", 429, "Limit has exceeded"),
+                ResponseError("InvalidParameterException", 400, "Invalid format for refresh token")
+            ])
+
+        content = {
+            "message": "Successfully generated token",
+            "AccessToken": response["AuthenticationResult"]["AccessToken"],
+            "ExpiresIn": response["AuthenticationResult"]["ExpiresIn"],
+        }
+
+        return JSONResponse(content=content, status_code=200)
