@@ -11,11 +11,10 @@ jobs:
       - name: Checkout the code
         uses: actions/checkout@v1
 
-      - name: Decode the SSH key
-        run: echo "${{ secrets.EC2_SSH_KEY }}" | base64 -d > key.pem
-
-      - name: Set permissions for SSH key
-        run: chmod 600 key.pem
+      - name: Setup SSH Key
+        run: |
+          echo "${{ secrets.EC2_SSH_KEY }}" | base64 -d > ~/.ssh/deploy_key
+          chmod 400 ~/.ssh/deploy_key
 
       - name: Deploy to my EC2 instance
         uses: easingthemes/ssh-deploy@v2.1.5
