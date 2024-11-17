@@ -50,7 +50,7 @@ class CognitoClient:
     
     def logout(self, access_token: str):
         return self.client.global_sign_out(
-            AccessToken = access_token
+            AccessToken=access_token
         )
 
 def get_cognito_client() -> CognitoClient:
