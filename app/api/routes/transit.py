@@ -33,10 +33,11 @@ async def get_destinations(operator_id: str = Query(..., description="Transit op
         
         # Filter stops based on accessibility (only include accessible stops)
         accessible_stops = [
-            stop for stop in accessible_stops
-            if stop.get("AccessibilityAssessment", {}).get("MobilityImpairedAccess") not in ["unknown", None]
+            stop for stop in stop_places
+            if stop.get("AccessibilityAssessment", {}).get("MobilityImpairedAccess") == "Yes"
         ]
-        
+        print(f"Number of accessible stops: {len(accessible_stops)}")
+
         # Simulate favorites and recent stops (replace with actual logic for your app)
         favorited_stop_ids = []  # Example of favorited stop IDs (could be replaced by actual user data)
         recently_visited_stop_ids = []  # Example of recent stops (could be replaced by actual user data)
@@ -46,6 +47,8 @@ async def get_destinations(operator_id: str = Query(..., description="Transit op
             stop["Name"] in favorited_stop_ids,   # Favorited first
             stop["Name"] in recently_visited_stop_ids  # Recently visited second
         ), reverse=True)
+        
+        print(f"Number of sorted stops: {len(sorted_stops)}")
 
         return {"sorted_stops": sorted_stops}
 

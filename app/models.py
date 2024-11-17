@@ -14,3 +14,6 @@ class UserSignup(BaseModel):
 
 class RefreshToken(BaseModel):
     refresh_token: str
+
+class AccessToken(BaseModel):
+    access_token: str

@@ -1,7 +1,7 @@
 import boto3
 from app.core.config import settings
 from app.models import UserSignup, UserLogin
-
+from pydantic import EmailStr
 
 class CognitoClient:
     def __init__(self):
@@ -41,6 +41,16 @@ class CognitoClient:
             AuthParameters={
                 "REFRESH_TOKEN": refresh_token,
             }
+        )
+
+    def user_exists(self, access_token: str):
+        return self.client.get_user(
+            AccessToken=access_token
+        )
+    
+    def logout(self, access_token: str):
+        return self.client.global_sign_out(
+            AccessToken = access_token
         )
 
 def get_cognito_client() -> CognitoClient:

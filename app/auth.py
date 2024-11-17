@@ -1,8 +1,11 @@
+
+
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 from app.api.deps import CognitoClient
 from app.models import UserSignup, UserLogin
 from dataclasses import dataclass
+from pydantic import EmailStr
 import botocore
 
 @dataclass
@@ -74,3 +77,30 @@ class Auth:
         }
 
         return JSONResponse(content=content, status_code=200)
+    
+    def get_user_info(self, access_token: str):
+        try:
+            response = self.cognito.user_exists(access_token)
+        except botocore.exceptions.ClientError as e:
+            raise_http_exception([
+                ResponseError("UserNotFoundException", 404, "User cannot be found")
+            ])
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"{e}")
+        
+        content = {attribute["Name"]: attribute["Value"] for attribute in response["UserAttributes"]}
+
+        return JSONResponse(content=content, status_code=200)
+
+    def logout(self, access_token: str):
+        try:
+            self.cognito.logout(access_token)
+        except botocore.exceptions.ClientError as e:
+            raise_http_exception(e, [
+                ResponseError("NotAuthorizedException", 401, "Access token is invalid"),
+                ResponseError("TooManyRequestsException", 429, "Too many requests"),
+                ResponseError("InvalidParameterException", 400, "Wrong format of access token"),
+            ])
+        
+        return JSONResponse(content={"message": "success"}, status_code=200)
+
