@@ -139,3 +139,49 @@ async def fetch_stop_places(operator_id: str) -> dict:
         raise HTTPException(status_code=500, detail="Failed to parse XML response.")
 
     return {"scheduled_departures": data}
+
+
+@router.get("/transit/destination_search")
+async def destination_search(
+    operator_id: str = Query(..., description="Transit operator ID (e.g., 'SF')"),
+    favorited_stop_ids: Optional[List[str]] = Query(None, description="List of favorited stop IDs"),
+    recently_visited_stop_ids: Optional[List[str]] = Query(None, description="List of recently visited stop IDs"),
+):
+    """
+    Fetch and return stop places prioritized by favorited, recently visited, and others, with filtering by accessibility.
+    """
+    # Fetch stop places from the 511 API
+    data = await fetch_stop_places(operator_id)
+    
+    try:
+        # Extract stop places from the response
+        stop_places = data["Siri"]["ServiceDelivery"]["DataObjectDelivery"]["dataObjects"]["SiteFrame"]["stopPlaces"]["StopPlace"]
+    except KeyError:
+        raise HTTPException(status_code=404, detail="No stop places found.")
+    
+    # Prioritize stop places
+    # 1. Favorited stops
+    # 2. Recently visited stops
+    # 3. All other stops
+    prioritized_stops = []
+    
+    # Add favorited stops first
+    if favorited_stop_ids:
+        favorited_stops = [stop for stop in stop_places if stop["id"] in favorited_stop_ids]
+        prioritized_stops.extend(favorited_stops)
+    
+    # Add recently visited stops next
+    if recently_visited_stop_ids:
+        recently_visited_stops = [stop for stop in stop_places if stop["id"] in recently_visited_stop_ids]
+        prioritized_stops.extend(recently_visited_stops)
+    
+    # Add remaining stops
+    remaining_stops = [stop for stop in stop_places if stop["id"] not in favorited_stop_ids and stop["id"] not in recently_visited_stop_ids]
+    prioritized_stops.extend(remaining_stops)
+    
+    # Filter by accessibility (only include stops with "MobilityImpairedAccess" marked as "Yes")
+    accessible_stops = [stop for stop in prioritized_stops if stop.get("AccessibilityAssessment", {}).get("MobilityImpairedAccess") == "Yes"]
+
+    # Return the accessible stops
+    return {"accessible_stops": accessible_stops}
+ 
